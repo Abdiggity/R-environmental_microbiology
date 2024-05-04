@@ -1,0 +1,443 @@
+
+rm(list=ls())
+# set your working directory to the folder containing your data
+setwd("C:/Users/612ra/OneDrive/Documents/UNI/ENVIRO MICRO")
+
+# Loading the dataset and splitting the otus from the metadata
+data= read.csv("LymePark data_full.csv")
+metadata = data[,1:10]
+#metadata = metadata[,1:6]
+ICP = data[,19:34]
+
+citation("BiodiversityR")
+#metadata = cbind(ICP[,1:3],metadata[2:6])
+otus = data[,36:ncol(data)]
+cfu = data[,11:18]
+
+
+# load in the ONLY package you will need for this; "vegan". If you need to install this then run this command 
+install.packages("vegan")
+# You will only need to do this one (per machine you use!), so place a "#" infront of it to allow R to "ignore" it.
+
+library(vegan)
+
+#
+
+# 1. Alpha diversity ####
+
+# For measures of alpha-diversity we are looking for absolute metrics to define a community. The simplest of these is "richness" (the number of species present).There are a number of ways to achieve this, but this is (conceptually) the simplest...
+
+# What measures are we taking? We need to create a new, empty, vector for each.
+richness = c()
+# Now create a loop so R looks at out OTU table 1 sample (row) at a time, and takes the number of values greater than 0.
+for (i in 1:nrow(otus)){
+  richness[i] = specnumber(otus[i,])
+}
+
+# Creating a factorial variable for "Site"
+
+fSite = as.factor(metadata$Site)
+
+# now we need to look at this. First let's have a look at richness at each site. Start to ask yourselves questions about the data: Is there anything you notice immediately? Are some samples higher/lower than others? What does this mean?
+plot(richness~fSite)
+
+# Now let's see if there are any differences in the organisation of the communities. For this we will do exactly the same process as for richness, but we will use Shannon's diversity index.
+simpson = c()
+for (i in 1:nrow(otus)){
+  simpson[i] = diversity(as.numeric(otus[i,]),index="simpson")
+}
+
+# Once again, we need to look at the data. Are there any patterns with Location? What does this tell you? 
+plot(simpson~fSite)
+
+# we could put these graphs side-by-side for comparison...(remember these are just the simplest graphs, you can make them much prettier wth ease!)
+par(mfrow=c(1,2))
+plot(richness~fSite,xlab="site",main="A")
+plot(simpson~fSite,xlab="site",main="B")
+
+# This is all well and good, but science lives by significance. Can we say if there are significant differences between any of the Locations? Yes! We can use a 1-way ANOVA for richness
+summary(aov(richness~fSite))
+
+# OK, now let's see where the differences are (between what Locations).
+TukeyHSD(aov(richness~fSite))
+
+# OK, so what about Shannon's? 
+summary(aov(simpson~fSite))
+TukeyHSD(aov(simpson~fSite))
+names()
+
+# End
+
+# 2. What is beta-diversity? ####
+
+# First of all, I will just go through creating and looking at beta-diversity measures. We will focus on Bray-Curtis dissimilarity measures. First we can generate distance matricies.
+
+otu.dist = vegdist(otus,method="bray")
+
+# We can have a look at this using heirarchical clustering to produce a dendrogram. This is purely for information, this is too confusing to use in the report but illustrates non-multivariate methods of this.
+par(mfrow=c(1,1))
+plot(hclust(otu.dist),labels=metadata$Site)
+
+# Currently, microbial ecology uses multivariate or ordination plots. These condense the large distance matrices into two axes, producing a cartesian plane in which we can plot our data. We will use the same method (Bray-Curtis dissimilarity) as above to produce a Nonmetric MultiDimensional Scaling (NMDS) plot.
+NMDS = metaMDS(otus,distance="bray",trymax=999)
+
+# Within the object NMDS there are a number of different parameters, but we are only interested in the ones that generate points on a graph. We can plot these to observe how similar the communities are
+plot(NMDS$points[,1],NMDS$points[,2])
+
+# The data look like there is a good spread of communities, but how do these relate to Location? There are many different ways of looking at this, we are going to use my favourite:
+ordispider(ord=NMDS, groups=metadata$Site, label=T)
+
+# Have a look at these graphs, do they tell you anything about the Locations? Is there more information than the Alpha diversity metrics? 
+
+#End
+
+# 3. Using beta-diversity ####
+
+# We are interested in the relationship between the spatial distribution of the communities and their similarity. So let's begin by creating the ordination data:
+NMDS = metaMDS(otus,distance="bray",trymax=999)
+plot(NMDS$points[,1],NMDS$points[,2])
+anosim(x=otus, grouping=metadata$Acidity, permutations=999, distance="bray")
+# As there is a greater variation along the NMDS 1 (x-axis) we will see if that has any relationship with the geographic distance. 
+# First, let's plot the geographic data (-Westings, Northings). The "-" in front of the Westings simply allows this to be plotted mapwise.
+plot(-metadata$Westings,metadata$Northings)
+
+# There are clearly two main groups, so we would expect these groups to be different from each other. As there is a greater variation in the -Westings, we will use that.
+plot(NMDS$points[,1]~metadata$Westings)
+
+# This plot clearly shows there are two distinct groups both in terms of distance (Westings) and dissimilarity (NMDS 1), therefore, this data supports the theory that the further communities are away from each other, the more distant they are. Can we put some significance values on this? Yes, we can use a regression:
+summary(lm(NMDS$points[,1]~metadata$Westings))
+
+# End
+
+# 4. Using gamma-diversity ####
+# Here, we are going to look at the entire dataset to understand more about the individual bacterial populations. We know the total species pool (number of bacterial OTUs) is 59 (i.e. the gamma diversity), but we don't know the distribution of these bacteria.
+# To start, the otu table needs to be converted to binary (presence/ absence)
+bin.otus = replace(otus,otus>0,1)
+
+# now we can use this binary matrix to work out the number of samples each of the OTUs is present in (as a percentage)
+distribution = colSums(bin.otus)/nrow(bin.otus)*100
+
+# then we go back to the original, non-binary, OTU table to calculate the total amount of each OTU across the dataset
+abundance = colSums(otus)
+
+# Now they can be plotted against each other (remember to log10 the abundance!)
+plot(log10(abundance)~distribution)
+
+# what does this tell you about the OTUs?
+
+# End
+
+# 5. Community assembly ####
+# To understand the processes we will calculate the probability of each OTU being present in the test community, in the context of the other communities. What this means is are these OTUs there by chance (drift), present in many communities (dispersal), or only in a subset (selection). We will borrow a function from Chase et al. (2011), that simulates the data 99 times to calculate the probabilities:
+raup_crick=function(spXsite, plot_names_in_col1=TRUE, classic_metric=FALSE, split_ties=TRUE, reps=99, set_all_species_equal=FALSE, as.distance.matrix=TRUE, report_similarity=FALSE){
+  
+  ##expects a species by site matrix for spXsite, with row names for plots, or optionally plots named in column 1.  By default calculates a modification of the Raup-Crick metric (standardizing the metric to range from -1 to 1 instead of 0 to 1). Specifying classic_metric=TRUE instead calculates the original Raup-Crick metric that ranges from 0 to 1. The option split_ties (defaults to TRUE) adds half of the number of null observations that are equal to the observed number of shared species to the calculation- this is highly recommended.  The argument report_similarity defaults to FALSE so the function reports a dissimilarity (which is appropriate as a measure of beta diversity).  Setting report_similarity=TRUE returns a measure of similarity, as Raup and Crick originally specified.  If ties are split (as we recommend) the dissimilarity (default) and similarity (set report_similarity=TRUE) calculations can be flipped by multiplying by -1 (for our modification, which ranges from -1 to 1) or by subtracting the metric from 1 (for the classic metric which ranges from 0 to 1). If ties are not split (and there are ties between the observed and expected shared number of species) this conversion will not work. The argument reps specifies the number of randomizations (a minimum of 999 is recommended- default is 9999).  set_all_species_equal weights all species equally in the null model instead of weighting species by frequency of occupancy.  
+  
+  ##Note that the choice of how many plots (rows) to include has a real impact on the metric, as species and their occurrence frequencies across the set of plots is used to determine gamma and the frequency with which each species is drawn from the null model	
+  ##this section moves plot names in column 1 (if specified as being present) into the row names of the matrix and drops the column of names
+  if(plot_names_in_col1){
+    row.names(spXsite)<-spXsite[,1]
+    spXsite<-spXsite[,-1]
+  }
+  
+  ## count number of sites and total species richness across all plots (gamma)
+  n_sites<-nrow(spXsite)
+  gamma<-ncol(spXsite)
+  
+  ##make the spXsite matrix into a pres/abs. (overwrites initial spXsite matrix):
+  ceiling(spXsite/max(spXsite))->spXsite
+  
+  ##create an occurrence vector- used to give more weight to widely distributed species in the null model:
+  occur<-apply(spXsite, MARGIN=2, FUN=sum)
+  
+  ##NOT recommended- this is a non-trivial change to the metric:
+  ##sets all species to occur with equal frequency in the null model
+  ##e.g.- discards any occupancy frequency information
+  if(set_all_species_equal){
+    occur<-rep(1,gamma)
+  }
+  ## determine how many unique species richness values are in the dataset
+  ##this is used to limit the number of null communities that have to be calculated
+  alpha_levels<-sort(unique(apply(spXsite, MARGIN=1, FUN=sum)))
+  
+  ##make_null:
+  ##alpha_table is used as a lookup to help identify which null distribution to use for the tests later.  It contains one row for each combination of alpha richness levels. 
+  
+  alpha_table<-data.frame(c(NA), c(NA))
+  names(alpha_table)<-c("smaller_alpha", "bigger_alpha")
+  col_count<-1
+  
+  ##null_array will hold the actual null distribution values.  Each element of the array corresponds to a null distribution for each combination of alpha values.  The alpha_table is used to point to the correct null distribution- the row numbers of alpha_table correspond to the [[x]] indices of the null_array.  Later the function will find the row of alpha_table with the right combination of alpha values.  That row number is used to identify the element of null_array that contains the correct null distribution for that combination of alpha levels. 
+  null_array<-list()
+  
+  ##looping over each combination of alpha levels:
+  
+  for(a1 in 1:length(alpha_levels)){
+    for(a2 in a1:length(alpha_levels)){
+      
+      ##build a null distribution of the number of shared species for a pair of alpha values:
+      null_shared_spp<-NULL
+      for(i in 1:reps){
+        
+        ##two empty null communities of size gamma:
+        com1<-rep(0,gamma)
+        com2<-rep(0,gamma)
+        
+        ##add alpha1 number of species to com1, weighting by species occurrence frequencies:
+        com1[sample(1:gamma, alpha_levels[a1], replace=FALSE, prob=occur)]<-1
+        
+        
+        ##same for com2:
+        com2[sample(1:gamma, alpha_levels[a2], replace=FALSE, prob=occur)]<-1
+        
+        ##how many species are shared in common?
+        null_shared_spp[i]<-sum((com1+com2)>1)
+      }
+      ##store null distribution, record values for alpha 1 and 2 in the alpha_table to help find the correct null distribution later:
+      null_array[[col_count]]<-null_shared_spp
+      
+      alpha_table[col_count, which(names(alpha_table)=="smaller_alpha")]<-alpha_levels[a1]
+      alpha_table[col_count, which(names(alpha_table)=="bigger_alpha")]<-alpha_levels[a2]
+      
+      #increment the counter for the columns of the alpha table/ elements of the null array
+      col_count<-col_count+1
+    }}
+  
+  ##create a new column with both alpha levels to match on:
+  alpha_table$matching<-paste(alpha_table[,1], alpha_table[,2], sep="_")
+  
+  #####################
+  ##do the test:
+  
+  ##build a site by site matrix for the results, with the names of the sites in the row and col names:
+  results<-matrix(data=NA, nrow=n_sites, ncol=n_sites, dimnames=list(row.names(spXsite), row.names(spXsite)))
+  
+  ##for each pair of sites (duplicates effort now to make a full matrix instead of a half one- but this part should be minimal time as compared to the null model building)
+  for(i in 1:n_sites){
+    for(j in 1:n_sites){
+      
+      ##how many species are shared between the two sites:
+      n_shared_obs<-sum((spXsite[i,]+spXsite[j,])>1)
+      
+      ## what was the observed richness of each site?
+      obs_a1<-sum(spXsite[i,])
+      obs_a2<-sum(spXsite[j,])
+      
+      ##place these alphas into an object to match against alpha_table (sort so smaller alpha is first)
+      obs_a_pair<-sort(c(obs_a1, obs_a2))
+      
+      ##match against the alpha table- row index identifies which element of the null array contains the correct null distribution for the observed combination of alpha values:
+      null_index<-which(alpha_table$matching==paste(obs_a_pair[1], obs_a_pair[2], sep="_"))
+      
+      ##how many null observations is the observed value tied with?
+      num_exact_matching_in_null<-sum(null_array[[null_index]]==n_shared_obs)
+      
+      ##how many null values are bigger than the observed value?
+      num_greater_in_null<-sum(null_array[[null_index]]>n_shared_obs)
+      rc<-(num_greater_in_null)/reps
+      if(split_ties){
+        rc<-((num_greater_in_null+(num_exact_matching_in_null)/2)/reps)
+      }
+      if(!classic_metric){
+        ##our modification of raup crick standardizes the metric to range from -1 to 1 instead of 0 to 1
+        rc<-(rc-.5)*2
+      }
+      ## at this point rc represents an index of dissimilarity- multiply by -1 to convert to a similarity as specified in the original 1979 Raup Crick paper
+      if(report_similarity & !classic_metric){
+        rc<- rc*-1
+      }
+      ## the switch to similarity is done differently if the original 0 to 1 range of the metric is used:
+      if(report_similarity & classic_metric){
+        rc<- 1-rc
+      }
+      ##store the metric in the results matrix:
+      results[i,j]<-round(rc, digits=2)
+    }
+  }
+  if(as.distance.matrix){
+    results<-as.dist(results)
+  }	
+  return(results)
+}
+
+# Now we will run this function with our data. We need to create a new dataframe with the samples named:
+named.otus = cbind(metadata$Sample,otus)
+
+# and run the function on it
+RC = raup_crick(named.otus)
+
+# To view the results, we need to put the data into a histogram. If we break the data into sections of 0.05, we can easily identify those simiulations with probabilities significantly different (<-0.95 or >0.95) from 0.
+plot(hist(RC,breaks=seq(-1,1,0.05)))
+
+# What is the primary processes effecting the assembly of the communities? Is this expected?
+
+# End
+
+# 6. Introducing environmental variables ####
+# In this section, we will use the environmental parameters to address why the ordination plot changes between the samples (as shown in 2. What is beta-diversity?) To start, we create, and plot, our NMDS values as before:
+NMDS = metaMDS(otus,distance="bray",trymax=999)
+
+plot(NMDS$points[,1],NMDS$points[,2]
+     ,ylab = "NMDS axis 2", xlab = "NMDS axis 1", las=1
+     ,col = "black", pch = metadata$Site)
+legend("topleft", pch = c(1:6), col = "black"
+       ,c("Site 1","Site 2","Site 3","Site 4","Site 5","Site 6")
+       ,bty="n")
+
+
+
+# Now we have that, we need to have a look at the metadata to identify the factors we have measured that could be affecting the communities.
+names(metadata)
+
+# Let's focus on Moisture, Air.temp, Grass.Temp, Rainfall, and Acidity. To assess these parameters and their impact on community change, we need to correlate these onto the NMDS graph. First, we create a new variable dataframe, then use the envfit() command:
+variables = cbind(metadata[,c(6:8)])
+variables = cbind(data[,c(9:10)])
+env.impact = envfit(NMDS,variables)
+plot(envfit(NMDS,variables,p.max=0.05,col="black"))
+
+# OK, so the plot is showing the the variables, but Acidity seems to be missing! This is because it is not possible to correlate a factor! If we look into the envfit output, we can see that pH is highly significant, so lets see where the differences lie. As it is a factor with two levels, we can use a simple comparison anosim(), and plot it on the graph.
+
+ordiellipse(ord=NMDS, groups=metadata$Acidity, kind="sd",label=T)
+
+anosim(x=otus, grouping=metadata$Acidity, permutations=999, distance="bray")
+
+# End
+cor.test(data$pseudomonas,ICP$Ca)
+cor.test(data$pseudomonas,ICP$Ca)
+
+
+
+# 7. Determining co-existence ####
+# In this, the final section, we will have a look at determining co-occurances between the OTUs. This can be important as we can postulate interactions between the OTUS and understand how this relates to functional outcomes (if we have the data!). there are many, many ways of achieving this, this script is going to outline the simplest, most robust method. Taking the OTU table, we are going to correlate each OTU against all the others. Positive correlations indicate the species are synergistic, negative correlations suggest antagonisms.
+# First, we create matrices to contain the significance values and correlation coefficients
+significance.corr = matrix(NA,nrow=ncol(otus),ncol=ncol(otus))
+coefficients.corr = significance.corr
+
+# Now we use a loop to correlate each OTU with every other OTU and put the significance and the coefficience into the appropriate matrix. For large datasets this can take a while...
+for (i in 1:ncol(otus)){
+  for (j in 1:ncol(otus)){
+    significance.corr[j,i] = cor.test(otus[,i],otus[,j],method="spearman")[[3]]
+    coefficients.corr[j,i] = cor.test(otus[,i],otus[,j],method="spearman")[[4]]
+    print(i/(ncol(otus))*100) # This is simply a counter to see how far through to OTUs we are
+  }}
+
+# Name out matrices so we know which OTU is interacting with which
+colnames(significance.corr) = names(otus);rownames(significance.corr) = names(otus)
+colnames(coefficients.corr) = names(otus);rownames(coefficients.corr) = names(otus)
+
+# Now, because we are correlating many OTUs with themselves and using the same data we need to correct for false positives. The most robust method is called a Bonferroni correction. Here, we divide our significance threshold (called alpha, normally 0.05) by the number of comparisons we are making (number of OTUs*number of OTUs) to give our new significance threshold!
+Balpha.multiple = 0.05/(ncol(otus)^2)
+
+significance.corr.bon = replace(significance.corr,significance.corr>Balpha.multiple,NA)
+coefficients.corr.bon = replace(coefficients.corr,significance.corr>Balpha.multiple,NA)
+options(scipen = 20)
+#Creating the "Acidity" vector
+metadata$Acidity<-rep("NA",length(metadata$pH))
+metadata$Acidity[metadata$pH >6] <-"Neutral"
+metadata$Acidity[metadata$pH <6] <-"Acidic"
+
+# We can use the same methodology to understand whether there are any OTUs that are selected for (see parts 5 & 6) by a particular variable, or function. We will start with environmental variables. As the most important variable in our analysis, I will choose pH. There is a slight issue in that its factoral...so no correlations:
+wilcox.pH = matrix(NA,nrow=2,ncol=ncol(otus))
+rownames(wilcox.pH) = c("Significance","Change");colnames(wilcox.pH)=names(otus)
+
+for (i in 1:ncol(otus)){
+  wilcox.pH[1,i] = wilcox.test(otus[metadata$Acidity=="Acidic",i],
+                               otus[metadata$Acidity=="Neutral",i])[[3]]
+  wilcox.pH[2,i] = sum(otus[metadata$Acidity=="Acidic",i])-sum(otus[metadata$Acidity=="Neutral",i])
+} 
+
+# Again, as we are using the same pH data for all the comparisons we need to correct for false positives...Huzzah for Bonferroni! We are just going to remove the OTUs that are non-significant in this case.
+Balpha.single = 0.05/ncol(otus)
+
+wilcox.pH.bon = wilcox.pH[,wilcox.pH[1,]<Balpha.single]
+
+# We can also look at particular functions. In this dataset we will look at growth (biomass), but this could easily by production of an exoenzyme or other public good. (This method will also work with environmental factors that are continuous)
+correlations.ph = matrix(NA,nrow=2,ncol=ncol(otus))
+rownames(correlations.ph) = c("Significance","Coefficients");colnames(correlations.ph)=names(otus)
+
+for (i in 1:ncol(otus)){
+  correlations.ph[1,i] = cor.test(otus[,i],metadata$pH,method="spearman")[[3]]
+  correlations.ph[2,i] = cor.test(otus[,i],metadata$pH,method="spearman")[[4]]
+} 
+
+correlations.ph.bon = correlations.ph[,correlations.ph[1,]<Balpha.single]
+correlations.ph.bon
+# End
+correlations.co = matrix(NA,nrow=2,ncol=ncol(otus))
+rownames(correlations.co) = c("Significance","Coefficients");colnames(correlations.CO)=names(otus)
+
+for (i in 1:ncol(otus)){
+  correlations.co[1,i] = cor.test(otus[,i],ICP$Co,method="spearman")[[3]]
+  correlations.co[2,i] = cor.test(otus[,i],ICP$Co,method="spearman")[[4]]
+} 
+
+correlations.co.bon = correlations.co[,correlations.CO[1,]<Balpha.single]
+correlations.co.bon
+Balpha.single = 0.05/ncol(otus)
+
+
+
+NMDS = metaMDS(otus,distance="bray",trymax=999)
+par(mfrow=c(1,2))
+# Within the object NMDS there are a number of different parameters, but we are only interested in the ones that generate points on a graph. We can plot these to observe how similar the communities are
+plot(NMDS$points[,1],NMDS$points[,2])
+
+# The data look like there is a good spread of communities, but how do these relate to Location? There are many different ways of looking at this, we are going to use my favourite:
+ordispider(ord=NMDS, groups=metadata$Site, label=T)
+
+plot(NMDS$points[,1],NMDS$points[,2]
+     ,ylab = "NMDS axis 2", xlab = "NMDS axis 1", las=1
+     ,col = "black", pch = metadata$Site)
+legend("topleft", pch = c(1:6), col = "black"
+       ,c("Site 1","Site 2","Site 3","Site 4","Site 5","Site 6")
+       ,bty="n")
+
+names(metadata)
+
+# Let's focus on Moisture, Air.temp, Grass.Temp, Rainfall, and Acidity. To assess these parameters and their impact on community change, we need to correlate these onto the NMDS graph. First, we create a new variable dataframe, then use the envfit() command:
+variables = cbind(ICP[,c(2:16)])
+#variables = cbind(data[,c(9:9)])
+ordiellipse(ord=NMDS, groups=metadata$pH.type, kind="sd",label=T)
+env.impact = envfit(NMDS,variables)
+plot(envfit(NMDS,variables,p.max=0.05,col="black"))
+ordiellipse(ord=NMDS, groups=metadata$Acidity, kind="sd",label=T)
+
+
+install.packages("BiodiversityR")
+library (BiodiversityR)
+library(vegan)
+par(mfrow=c(2,3))
+RankAbun.1 <- rankabundance(otus[1:4,])
+RankAbun.1
+rankabunplot(RankAbun.1, scale='abundance site 1', addit=FALSE, specnames=c(1,2,3))
+
+RankAbun.2 <- rankabundance(otus[5:8,])
+RankAbun.2
+rankabunplot(RankAbun.2, scale='abundance site 2', addit=FALSE, specnames=c(1,2,3))
+
+RankAbun.3 <- rankabundance(otus[9:12,])
+RankAbun.3
+rankabunplot(RankAbun.3, scale='abundance site 3', addit=FALSE, specnames=c(1,2,3))
+
+RankAbun.4 <- rankabundance(otus[13:17,])
+RankAbun.4
+rankabunplot(RankAbun.4, scale='abundance site 4', addit=FALSE, specnames=c(1,2,3))
+
+RankAbun.5 <- rankabundance(otus[17:20,])
+RankAbun.5
+rankabunplot(RankAbun.5, scale='abundance site 5 ', addit=FALSE, specnames=c(1,2,3))
+
+RankAbun.6 <- rankabundance(otus[21:24,])
+RankAbun.6
+rankabunplot(RankAbun.6, scale='abundance site 6', addit=FALSE, specnames=c(1,2,3))
+
+
+cor.test(metadata$pH,data$Total.metal)
+options(scipen = 20)
+cor.test(metadata$pH,ICP$Fe)
+
+
+plot(ICP$Ca~fsite, ylab = "Ca concentration", xlab = "site")
+plot(ICP$Fe~fsite, ylab = "Fe concentration", xlab = "site")
+plot(ICP$Co~fsite, ylab = "CO concentration", xlab = "site")
+
